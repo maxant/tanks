@@ -1,0 +1,5 @@
+CREATE TABLE T_TANKS (
+  ID            VARCHAR(36),
+  PRIMARY KEY(ID)
+)
+;
