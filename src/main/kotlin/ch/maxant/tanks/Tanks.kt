@@ -9,15 +9,15 @@ import javax.ws.rs.Produces
 import javax.ws.rs.QueryParam
 import javax.ws.rs.core.MediaType
 
-@Path("/some-page")
-class SomePage {
+@Path("/tanks")
+class Tanks {
 
     @Inject
-    lateinit var page: Template
+    lateinit var tanks: Template
 
     @GET
     @Produces(MediaType.TEXT_HTML)
     operator fun get(@QueryParam("name") name: String?): TemplateInstance {
-        return page.data("name", name)
+        return tanks.data("name", name)
     }
 }

@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Tanks :: {name ?: "Qute"}</title>
+    <style>
+* { margin:0; padding:0; } /* to remove the top and left whitespace */
+html, body { width:100%; height:100%; } /* just to be sure these are full screen*/
+canvas { display:block; } /* To remove the scrollbars */
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<script>
+(function() { // https://stackoverflow.com/questions/4288253/html5-canvas-100-width-height-of-viewport
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const tanks = [
+        buildTank(0, 0, 0, 'green'), // players tank
+        buildTank(200, 200, 0, 'blue') // enemy tank
+    ];
+    const myTank = tanks[0];
+    const otherTanks = tanks.filter(t => t !== myTank);
+    const dt = 40; // ms; 25 fps
+    const tankRadius = 12;
+
+    window.addEventListener('resize', resizeCanvas); // resize the canvas to fill browser window dynamically
+    document.addEventListener('keydown', keydown);
+
+    resizeCanvas();
+
+    function buildTank(x, y, direction, colour) {
+        return {
+            position: { x, y },
+            direction,
+            colour,
+            speed: 0
+        }
+    }
+
+    function getScreenCentre(offsetX = 0, offsetY = 0) {
+        return {
+            x: offsetX + (canvas.width / 2),
+            y: offsetY + (canvas.height / 2)
+        }
+    }
+
+    function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        render();
+    }
+
+    function keydown(e) {
+        if(myTank.crashed) return;
+
+        if(e.keyCode == 40) { // down => slower
+            myTank.speed = Math.max(-5, myTank.speed - 1);
+        } else if(e.keyCode == 38) { // up => faster
+            myTank.speed = Math.min(10, myTank.speed + 1);
+        } else if(e.keyCode == 37) { // left => rotate
+            myTank.direction--;
+            if(myTank.direction < 0) myTank.direction += 360;
+        } else if(e.keyCode == 39) { // right => rotate
+            myTank.direction++;
+            if(myTank.direction > 359) myTank.direction -= 360;
+        } else if(e.keyCode == 32) { // space => full stop
+            myTank.speed = 0;
+        } else {
+            console.log("keydown " + e.keyCode);
+        }
+    }
+
+    function render() {
+        moveTanks();
+        checkForCrashes();
+
+        // blanken screen
+        ctx.save();
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.restore();
+
+        // hud
+        ctx.save();
+        ctx.fillStyle = 'red';
+        ctx.font = "12px Arial";
+        ctx.fillText("speed: " + myTank.speed, 10, 10);
+        ctx.fillText("direction: " + myTank.direction, 10, 20);
+        ctx.restore();
+
+        tanks.forEach((tank) => {
+            ctx.save();
+            const centre = getScreenCentre();
+            // translate
+            ctx.translate(centre.x, centre.y);
+            ctx.translate(tank.position.x, tank.position.y);
+            // rotate
+            ctx.rotate((Math.PI / 180) * (tank.direction - 90));
+            // body
+            ctx.fillStyle = tank.colour;
+            ctx.beginPath();
+            ctx.arc(0, 0, tankRadius, 0, 2 * Math.PI);
+            ctx.fill();
+            // gun
+            ctx.fillStyle = 'black';
+            ctx.fillRect(-2, 0, 5, 2*tankRadius+3);
+            ctx.fillRect(-tankRadius-3, -tankRadius, 3, 2*tankRadius); // tracks
+            ctx.fillRect(+tankRadius, -tankRadius, 3, 2*tankRadius); // tracks
+            // dead
+            if(tank.crashed) {
+                ctx.fillStyle = 'orange';
+                ctx.font = "48px Arial";
+                let txt = "X";
+                let metrics = ctx.measureText(txt);
+                let fontHeight = metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent;
+                let actualHeight = metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent;
+                ctx.fillText(txt, -metrics.width/2, +actualHeight/2);
+            }
+            ctx.restore();
+        });
+    }
+
+    function checkForCrashes() {
+
+        // https://www.geeksforgeeks.org/check-two-given-circles-touch-intersect/
+        function circlesIntersect(x1, y1, x2, y2, r1, r2) {
+            let distSq = Math.sqrt( (x1 - x2) * (x1 - x2) +
+                                    (y1 - y2) * (y1 - y2) );
+            let radSum = (r1 + r2);
+            return distSq <= radSum;
+        }
+
+        tanks.forEach(t1 => {
+            tanks.forEach(t2 => {
+                if(t1 !== t2) {
+                    if(circlesIntersect(t1.position.x, t1.position.y, t2.position.x, t2.position.y, tankRadius, tankRadius) > 0) {
+                        t1.crashed = true;
+                        t1.speed = 0;
+                        t2.crashed = true;
+                        t2.speed = 0;
+                    }
+                }
+            });
+        });
+    }
+
+    function moveTanks() {
+        tanks.forEach(tank => {
+            // speed = distance / time => distance = speed * time; time = 100;
+            const distance = tank.speed * dt / 100; // 100 is a factor to slow everything down!
+            tank.position.x += distance * Math.cos(tank.direction * Math.PI / 180);
+            tank.position.y += distance * Math.sin(tank.direction * Math.PI / 180);
+        });
+
+        // now reset relative to mine, so mine stays in the middle of the screen
+        otherTanks.forEach(tank => {
+            tank.position.x -= myTank.position.x;
+            tank.position.y -= myTank.position.y;
+        });
+        myTank.position.x = 0;
+        myTank.position.y = 0;
+    }
+
+    setInterval(render, dt);
+})();
+
+// TODO
+// - stop gently
+// - fire at each other
+// - how to get backend to validate positions? or do the calcs in the backend, based on the input controls provided by the front end?
+// - add ground texture - add repeating tiles
+// - ai for other tanks
+// - shields and their damage
+</script>
+</body>
+</html>
