@@ -16,8 +16,8 @@ canvas { display:block; } /* To remove the scrollbars */
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     const tanks = [
-        buildTank(0, 0, 0, 'green'), // players tank
-        buildTank(200, 200, 0, 'blue') // enemy tank
+        buildTank(0, 0, 0, 0, 'green'), // players tank
+        buildTank(200, 200, 90, 1, 'blue') // enemy tank
     ];
     const myTank = tanks[0];
     const otherTanks = tanks.filter(t => t !== myTank);
@@ -29,12 +29,17 @@ canvas { display:block; } /* To remove the scrollbars */
 
     resizeCanvas();
 
-    function buildTank(x, y, direction, colour) {
+    function buildTank(x, y, direction, speed, colour) {
         return {
             position: { x, y },
             direction,
             colour,
-            speed: 0
+            speed,
+            isDead: false,
+            dead: function() {
+                this.speed = 0;
+                this.isDead = true;
+            }
         }
     }
 
@@ -52,7 +57,7 @@ canvas { display:block; } /* To remove the scrollbars */
     }
 
     function keydown(e) {
-        if(myTank.crashed) return;
+        if(myTank.isDead) return;
 
         if(e.keyCode == 40) { // down => slower
             myTank.speed = Math.max(-5, myTank.speed - 1);
@@ -66,6 +71,11 @@ canvas { display:block; } /* To remove the scrollbars */
             if(myTank.direction > 359) myTank.direction -= 360;
         } else if(e.keyCode == 32) { // space => full stop
             myTank.speed = 0;
+        } else if(e.keyCode == 70) { // F => fire
+            myTank.firing = true;
+            setTimeout(() => {
+                myTank.firing = false;
+            }, 100);
         } else {
             console.log("keydown " + e.keyCode);
         }
@@ -102,13 +112,13 @@ canvas { display:block; } /* To remove the scrollbars */
             ctx.beginPath();
             ctx.arc(0, 0, tankRadius, 0, 2 * Math.PI);
             ctx.fill();
-            // gun
+
             ctx.fillStyle = 'black';
-            ctx.fillRect(-2, 0, 5, 2*tankRadius+3);
+            ctx.fillRect(-2, 0, 5, 2*tankRadius+3); // gun
             ctx.fillRect(-tankRadius-3, -tankRadius, 3, 2*tankRadius); // tracks
             ctx.fillRect(+tankRadius, -tankRadius, 3, 2*tankRadius); // tracks
-            // dead
-            if(tank.crashed) {
+
+            if(tank.isDead) {
                 ctx.fillStyle = 'orange';
                 ctx.font = "48px Arial";
                 let txt = "X";
@@ -116,9 +126,47 @@ canvas { display:block; } /* To remove the scrollbars */
                 let fontHeight = metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent;
                 let actualHeight = metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent;
                 ctx.fillText(txt, -metrics.width/2, +actualHeight/2);
+            } else { // still alive
+                if(tank.firing) {
+                    const endOfFireX = (canvas.width+canvas.height) * Math.cos(tank.direction * Math.PI / 180);
+                    const endOfFireY = (canvas.width+canvas.height) * Math.sin(tank.direction * Math.PI / 180);
+                    tanks.forEach((otherTank) => {
+                        if(tank !== otherTank) {
+                            if(lineInterceptsCircle(tank.position.x,
+                                                    tank.position.y,
+                                                    endOfFireX,
+                                                    endOfFireY,
+                                                    otherTank.position.x,
+                                                    otherTank.position.y,
+                                                    tankRadius)){
+                                otherTank.dead();
+                            }
+                        }
+                    });
+                    ctx.fillStyle = 'red';
+                    ctx.fillRect(-1, 2*tankRadius+5, 3, canvas.width + canvas.height); // width+height to be on the safe side
+                }
             }
             ctx.restore();
         });
+    }
+
+    // https://math.stackexchange.com/a/275537
+    // parameters: ax ay (end of line or actually center of tank), bx by (other end of line), cx cy r (circle posn & radius)
+    function lineInterceptsCircle(ax, ay, bx, by, cx, cy, r) {
+        ax -= cx;
+        ay -= cy;
+        bx -= cx;
+        by -= cy;
+        const a = (bx - ax)**2 + (by - ay)**2;
+        const b = 2*(ax*(bx - ax) + ay*(by - ay));
+        const c = ax**2 + ay**2 - r**2;
+        const disc = b**2 - 4*a*c;
+        if(disc <= 0) return false;
+        const sqrtdisc = Math.sqrt(disc);
+        const t1 = (-b + sqrtdisc)/(2*a);
+        const t2 = (-b - sqrtdisc)/(2*a);
+        return (0 < t1 && t1 < 1) || (0 < t2 && t2 < 1);
     }
 
     function checkForCrashes() {
@@ -135,10 +183,8 @@ canvas { display:block; } /* To remove the scrollbars */
             tanks.forEach(t2 => {
                 if(t1 !== t2) {
                     if(circlesIntersect(t1.position.x, t1.position.y, t2.position.x, t2.position.y, tankRadius, tankRadius) > 0) {
-                        t1.crashed = true;
-                        t1.speed = 0;
-                        t2.crashed = true;
-                        t2.speed = 0;
+                        t1.dead();
+                        t2.dead();
                     }
                 }
             });
@@ -166,12 +212,18 @@ canvas { display:block; } /* To remove the scrollbars */
 })();
 
 // TODO
-// - stop gently
-// - fire at each other
+// - add points
+// - limit how many shots you have
+// - add weapons cache
+// - add fuel and fuel cache
+// - add health and reduce it depending on weapon
+// - add weapons
 // - how to get backend to validate positions? or do the calcs in the backend, based on the input controls provided by the front end?
+// - stop gently
 // - add ground texture - add repeating tiles
 // - ai for other tanks
 // - shields and their damage
+// - "radar" on edge of screen, to show tanks that are off screen, with distance to them
 </script>
 </body>
 </html>
