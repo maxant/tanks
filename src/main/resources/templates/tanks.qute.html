@@ -16,8 +16,9 @@ canvas { display:block; } /* To remove the scrollbars */
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     const tanks = [
-        buildTank(0, 0, 0, 0, 'green'), // players tank
-        buildTank(200, 200, 90, 1, 'blue') // enemy tank
+        buildTank(0, 0, 0, 0, 'green'),      // players tank
+        buildTank(200, 200, 90, 1, 'blue'),  // enemy tank 1
+        buildTank(-200, 200, 270, 1, 'grey') // enemy tank 2
     ];
     const myTank = tanks[0];
     const otherTanks = tanks.filter(t => t !== myTank);
@@ -35,10 +36,90 @@ canvas { display:block; } /* To remove the scrollbars */
             direction,
             colour,
             speed,
-            isDead: false,
-            dead: function() {
-                this.speed = 0;
-                this.isDead = true;
+            health: 100,
+            points: 0,
+            fuel: 100,
+            weapons: [
+                { hit: 50, name: 'Class III Laser', rounds: 5, colour: 'red', numPointsForAHit: 10 },
+                { hit: 10, name: '20mm Gun', rounds: 50, colour: 'grey', numPointsForAHit: 2 }
+            ],
+            selectedWeaponIndex: 0,
+            firing: false,
+            firstRenderDuringFire: false,
+
+            /** returns true if also killed */
+            reduceHealth: function(hit) {
+                if(this.health > 0) {
+                    this.health -= hit;
+                    if(this.isDead()) {
+                        this.speed = 0;
+                        return true;
+                    }
+                }
+                return false;
+            },
+            isDead: function() {
+                return this.health <= 0;
+            },
+            isAlive: function() {
+                return !this.isDead();
+            },
+            stop: function() {
+                if(this.speed > 0) {
+                    this.speed = this.speed - 2;
+                    setTimeout(() => {
+                        this.stop();
+                    }, 100);
+                } else {
+                    this.speed = 0; // since it steps in 2s, it can go below, so fix that here
+                }
+            },
+            fire: function() {
+                this.firstRenderDuringFire = true;
+                if(this.getSelectedWeapon().rounds > 0) {
+                    this.getSelectedWeapon().rounds--;
+                    this.firing = true;
+                    setTimeout(() => {
+                        this.firing = false;
+                    }, 300);
+                }
+            },
+            getSelectedWeapon: function() {
+                return this.weapons[this.selectedWeaponIndex];
+            },
+            changeWeapon: function() {
+                this.selectedWeaponIndex++;
+                if(this.selectedWeaponIndex >= this.weapons.length) {
+                    this.selectedWeaponIndex = 0;
+                }
+            },
+            getSelectedWeaponHit: function() {
+                return this.getSelectedWeapon().hit;
+            },
+            addPointsForHit: function(distance) {
+                if(this.firstRenderDuringFire) {
+                    this.points += Math.round(distance * this.getSelectedWeapon().numPointsForAHit);
+                }
+            },
+            addPointsForKill: function(distance) {
+                if(this.firstRenderDuringFire) {
+                    this.points += Math.round(distance * 10);
+                }
+            },
+            subtractPointsForMiss: function() {
+                if(this.firstRenderDuringFire) {
+                    this.points -= this.getSelectedWeapon().numPointsForAHit * 10;
+                }
+            },
+            hasFuel: function() {
+                return this.fuel > 0;
+            },
+            reduceFuel: function(distance) {
+                this.fuel -= Math.abs(distance) / 100;
+                if(this.fuel <= 0) {
+                    this.speed = 0;
+                    this.fuel = 0;
+                }
             }
         }
     }
@@ -53,29 +134,35 @@ canvas { display:block; } /* To remove the scrollbars */
     function resizeCanvas() {
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
-        render();
     }
 
     function keydown(e) {
-        if(myTank.isDead) return;
+        if(myTank.isDead()) return;
 
         if(e.keyCode == 40) { // down => slower
             myTank.speed = Math.max(-5, myTank.speed - 1);
         } else if(e.keyCode == 38) { // up => faster
             myTank.speed = Math.min(10, myTank.speed + 1);
         } else if(e.keyCode == 37) { // left => rotate
-            myTank.direction--;
-            if(myTank.direction < 0) myTank.direction += 360;
+            if(myTank.hasFuel()) {
+                myTank.direction--;
+                myTank.direction--;
+                if(myTank.direction < 0) myTank.direction += 360;
+                myTank.reduceFuel(1);
+            }
         } else if(e.keyCode == 39) { // right => rotate
-            myTank.direction++;
-            if(myTank.direction > 359) myTank.direction -= 360;
+            if(myTank.hasFuel()) {
+                myTank.direction++;
+                myTank.direction++;
+                if(myTank.direction > 359) myTank.direction -= 360;
+                myTank.reduceFuel(1);
+            }
         } else if(e.keyCode == 32) { // space => full stop
-            myTank.speed = 0;
+            myTank.stop(myTank);
         } else if(e.keyCode == 70) { // F => fire
-            myTank.firing = true;
-            setTimeout(() => {
-                myTank.firing = false;
-            }, 100);
+            myTank.fire();
+        } else if(e.keyCode == 87) { // W => change weapon
+            myTank.changeWeapon();
         } else {
             console.log("keydown " + e.keyCode);
         }
@@ -85,7 +172,7 @@ canvas { display:block; } /* To remove the scrollbars */
         moveTanks();
         checkForCrashes();
 
-        // blanken screen
+        // clear screen
         ctx.save();
         ctx.fillStyle = 'white';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -95,8 +182,12 @@ canvas { display:block; } /* To remove the scrollbars */
         ctx.save();
         ctx.fillStyle = 'red';
         ctx.font = "12px Arial";
-        ctx.fillText("speed: " + myTank.speed, 10, 10);
-        ctx.fillText("direction: " + myTank.direction, 10, 20);
+        let line = 1;
+        ctx.fillText("speed: " + myTank.speed, 10, 10*line++);
+        ctx.fillText("direction: " + myTank.direction, 10, 10*line++);
+        ctx.fillText("selected weapon: " + myTank.getSelectedWeapon().name + ", rounds remaining: " + myTank.getSelectedWeapon().rounds, 10, 10*line++);
+        ctx.fillText("points: " + myTank.points, 10, 10*line++);
+        ctx.fillText("fuel: " + myTank.fuel.toFixed(2), 10, 10*line++);
         ctx.restore();
 
         tanks.forEach((tank) => {
@@ -105,6 +196,12 @@ canvas { display:block; } /* To remove the scrollbars */
             // translate
             ctx.translate(centre.x, centre.y);
             ctx.translate(tank.position.x, tank.position.y);
+
+            // health
+            ctx.fillStyle = 'black';
+            ctx.font = "10px Arial";
+            ctx.fillText("Health: " + tank.health + "%", 10, -20);
+
             // rotate
             ctx.rotate((Math.PI / 180) * (tank.direction - 90));
             // body
@@ -118,7 +215,7 @@ canvas { display:block; } /* To remove the scrollbars */
             ctx.fillRect(-tankRadius-3, -tankRadius, 3, 2*tankRadius); // tracks
             ctx.fillRect(+tankRadius, -tankRadius, 3, 2*tankRadius); // tracks
 
-            if(tank.isDead) {
+            if(tank.isDead()) {
                 ctx.fillStyle = 'orange';
                 ctx.font = "48px Arial";
                 let txt = "X";
@@ -128,9 +225,12 @@ canvas { display:block; } /* To remove the scrollbars */
                 ctx.fillText(txt, -metrics.width/2, +actualHeight/2);
             } else { // still alive
                 if(tank.firing) {
-                    const endOfFireX = (canvas.width+canvas.height) * Math.cos(tank.direction * Math.PI / 180);
-                    const endOfFireY = (canvas.width+canvas.height) * Math.sin(tank.direction * Math.PI / 180);
+                    const maxDistance = Math.sqrt(canvas.width**2 + canvas.height**2);
+                    const endOfFireX = maxDistance * Math.cos(tank.direction * Math.PI / 180);
+                    const endOfFireY = maxDistance * Math.sin(tank.direction * Math.PI / 180);
+                    const candidates = [ { d: maxDistance, t: null } ];
                     tanks.forEach((otherTank) => {
+                        let distance = canvas.width+canvas.height;
                         if(tank !== otherTank) {
                             if(lineInterceptsCircle(tank.position.x,
                                                     tank.position.y,
@@ -139,16 +239,48 @@ canvas { display:block; } /* To remove the scrollbars */
                                                     otherTank.position.x,
                                                     otherTank.position.y,
                                                     tankRadius)){
-                                otherTank.dead();
+                                const distanceBetweenTanks = Math.sqrt((tank.position.x - otherTank.position.x)**2 + (tank.position.y - otherTank.position.y)**2);
+                                candidates.push( { d: distanceBetweenTanks, t: otherTank } );
                             }
                         }
                     });
-                    ctx.fillStyle = 'red';
-                    ctx.fillRect(-1, 2*tankRadius+5, 3, canvas.width + canvas.height); // width+height to be on the safe side
+
+                    const closest = getClosest(candidates);
+                    if(closest.t) {
+                        const distanceBetweenTanks = Math.sqrt((tank.position.x - closest.t.position.x)**2 + (tank.position.y - closest.t.position.y)**2);
+                        if(closest.t.isAlive()) {
+                            tank.addPointsForHit(distanceBetweenTanks);
+                        }
+
+                        if(tank.firstRenderDuringFire) {
+                            const killed = closest.t.reduceHealth(tank.getSelectedWeaponHit());
+                            if(killed) {
+                                tank.addPointsForKill(distanceBetweenTanks);
+                            }
+                        }
+                    } else {
+                        tank.subtractPointsForMiss();
+                    }
+
+                    // fire
+                    ctx.fillStyle = tank.getSelectedWeapon().colour;
+                    ctx.fillRect(-1, 2*tankRadius + 5, 3, closest.d - 2*tankRadius + 5);
+
+                    tank.firstRenderDuringFire = false;
                 }
             }
             ctx.restore();
         });
+    }
+
+    function getClosest(candidates) {
+        let closest;
+        candidates.forEach(candidate => {
+            if(!closest || candidate.d < closest.d) {
+                closest = candidate;
+            }
+        });
+        return closest;
     }
 
     // https://math.stackexchange.com/a/275537
@@ -183,8 +315,8 @@ canvas { display:block; } /* To remove the scrollbars */
             tanks.forEach(t2 => {
                 if(t1 !== t2) {
                     if(circlesIntersect(t1.position.x, t1.position.y, t2.position.x, t2.position.y, tankRadius, tankRadius) > 0) {
-                        t1.dead();
-                        t2.dead();
+                        t1.reduceHealth(100);
+                        t2.reduceHealth(100);
                     }
                 }
             });
@@ -197,6 +329,8 @@ canvas { display:block; } /* To remove the scrollbars */
             const distance = tank.speed * dt / 100; // 100 is a factor to slow everything down!
             tank.position.x += distance * Math.cos(tank.direction * Math.PI / 180);
             tank.position.y += distance * Math.sin(tank.direction * Math.PI / 180);
+
+            tank.reduceFuel(distance);
         });
 
         // now reset relative to mine, so mine stays in the middle of the screen
@@ -212,17 +346,12 @@ canvas { display:block; } /* To remove the scrollbars */
 })();
 
 // TODO
-// - add points
-// - limit how many shots you have
 // - add weapons cache
-// - add fuel and fuel cache
-// - add health and reduce it depending on weapon
-// - add weapons
+// - add fuel cache
 // - how to get backend to validate positions? or do the calcs in the backend, based on the input controls provided by the front end?
-// - stop gently
 // - add ground texture - add repeating tiles
 // - ai for other tanks
-// - shields and their damage
+// - shields increase health or slow its descent
 // - "radar" on edge of screen, to show tanks that are off screen, with distance to them
 </script>
 </body>
